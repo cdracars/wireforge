@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WireforgeApp } from "./WireforgeApp";
 import { serializeProjectJson } from "@/domain/project";
 import { createDemoProject } from "@/domain/project";
@@ -7,6 +7,7 @@ import { createDemoProject } from "@/domain/project";
 describe("editor flow", () => {
   afterEach(cleanup);
   beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
   it("edits the live harness, branches, removes, and saves locally", () => {
     const { container } = render(<WireforgeApp />);
     expect(
@@ -167,6 +168,31 @@ describe("editor flow", () => {
       "Save failed: Unable to save project in this browser.",
     );
     setItem.mockRestore();
+  });
+  it("uses underscores for spaces in TOML download names", () => {
+    // Arrange
+    const createObjectURL = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:wireforge-toml");
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    const createElement = vi.spyOn(document, "createElement");
+    render(<WireforgeApp />);
+
+    // Act
+    fireEvent.click(screen.getByRole("button", { name: "TOML" }));
+
+    // Assert
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(anchorClick).toHaveBeenCalled();
+    const anchor = createElement.mock.results
+      .map((result) => result.value)
+      .find(
+        (element): element is HTMLAnchorElement =>
+          element instanceof HTMLAnchorElement && element.download.endsWith(".toml"),
+      );
+    expect(anchor?.download).toBe("Toolhead_Example_Harness.toml");
   });
   it("changes one shared-source wire without mutating its peers", () => {
     render(<WireforgeApp />);
