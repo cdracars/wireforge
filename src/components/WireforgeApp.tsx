@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
+  Link2,
   GripVertical,
   Trash2,
   ArrowLeftRight,
@@ -32,6 +33,11 @@ import { wireColors } from "@/config/wire-colors";
 import { AppFooter, AppHeader } from "./AppChrome";
 import { DiagramSettings } from "./DiagramSettings";
 import { SavedProjectsDialog } from "./SavedProjectsDialog";
+import {
+  createCableBuilderShareUrl,
+  importCableBuilderShareUrl,
+  validateCableBuilderShareUrl,
+} from "@/domain/cablebuilder";
 const MAX_PROJECT_FILE_BYTES = 2 * 1024 * 1024;
 const download = (name: string, data: Blob) => {
   const a = document.createElement("a");
@@ -68,6 +74,16 @@ export function WireforgeApp() {
     addEventListener("keydown", key);
     return () => removeEventListener("keydown", key);
   });
+  useEffect(() => {
+    const closeMenus = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || event.target.closest(".action-menu")) return;
+      document.querySelectorAll<HTMLDetailsElement>(".action-menu[open]").forEach((menu) => {
+        menu.removeAttribute("open");
+      });
+    };
+    document.addEventListener("pointerdown", closeMenus);
+    return () => document.removeEventListener("pointerdown", closeMenus);
+  }, []);
   const updateConnector = (index: number, definitionId: string) =>
     h.update((old) => {
       const cs = [...old.connectors];
@@ -213,6 +229,63 @@ export function WireforgeApp() {
     setDragOverWireId(null);
   };
   const validationIssues = useMemo(() => validateProject(p), [p]);
+  const openCableBuilder = async () => {
+    const result = createCableBuilderShareUrl(p);
+    if (result.error) {
+      setMessage(result.error);
+      return;
+    }
+    const opened = window.open("about:blank", "_blank", "noopener,noreferrer");
+    if (!opened) {
+      setMessage("CableBuilder could not be opened. Please allow pop-ups for WireForge.");
+      return;
+    }
+    const preflight = await validateCableBuilderShareUrl(result.url!);
+    if (preflight.errors.length) {
+      opened.close();
+      setMessage(`CableBuilder export blocked: ${preflight.errors.join(" ")}`);
+      return;
+    }
+    opened.location.href = result.url!;
+    const notices = [...result.warnings, ...preflight.warnings];
+    setMessage(
+      notices.length
+        ? `CableBuilder opened. ${notices.join(" ")}`
+        : "CableBuilder opened in a new tab.",
+    );
+  };
+  const importCableBuilder = async () => {
+    const url = window.prompt("Paste a CableBuilder share URL:");
+    if (!url || !canReplaceProject()) return;
+    setMessage("Validating CableBuilder URL...");
+    const result = await importCableBuilderShareUrl(url.trim());
+    if (!result.project) {
+      setMessage(`CableBuilder import blocked: ${result.errors.join(" ")}`);
+      return;
+    }
+    h.replaceProject(result.project);
+    setMessage(
+      result.warnings.length
+        ? `CableBuilder project imported. ${result.warnings.join(" ")}`
+        : "CableBuilder project imported successfully.",
+    );
+  };
+  const menuAction = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    action: () => void,
+  ) => {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+    action();
+  };
+  const toggleMenu = (event: React.MouseEvent<HTMLElement>) => {
+    const currentMenu = event.currentTarget.closest("details");
+    if (!currentMenu || currentMenu.open) return;
+    currentMenu.parentElement
+      ?.querySelectorAll<HTMLDetailsElement>(".action-menu[open]")
+      .forEach((menu) => {
+        if (menu !== currentMenu) menu.removeAttribute("open");
+      });
+  };
   return (
     <main>
       <AppHeader
@@ -767,43 +840,73 @@ export function WireforgeApp() {
               <h2>Technical diagram</h2>
             </div>
             <div className="exports">
-              <button onClick={exportSvg}>
-                <Download />
-                SVG
-              </button>
-              <button onClick={exportPng}>
-                <Download />
-                PNG
-              </button>
-              <button
-                onClick={() =>
-                  download(
-                    `${p.name}.toml`,
-                    new Blob([serializeProject(p)], {
-                      type: "application/toml",
-                    }),
-                  )
-                }
-              >
-                <Download />
-                TOML
-              </button>
-              <button
-                onClick={() =>
-                  download(
-                    `${p.name}.json`,
-                    new Blob([serializeProjectJson(p)], {
-                      type: "application/json",
-                    }),
-                  )
-                }
-              >
-                <Download />
-                JSON
-              </button>
+              <details className="action-menu">
+                <summary onClick={toggleMenu}>
+                  <Download />
+                  Export
+                  <ChevronDown />
+                </summary>
+                <div className="action-menu-items">
+                  <button onClick={(event) => menuAction(event, exportSvg)}>
+                    <Download />
+                    SVG
+                  </button>
+                  <button onClick={(event) => menuAction(event, exportPng)}>
+                    <Download />
+                    PNG
+                  </button>
+                  <button
+                    onClick={(event) =>
+                      menuAction(event, () =>
+                        download(
+                          `${p.name}.toml`,
+                          new Blob([serializeProject(p)], {
+                            type: "application/toml",
+                          }),
+                        ),
+                      )
+                    }
+                  >
+                    <Download />
+                    TOML
+                  </button>
+                  <button
+                    onClick={(event) =>
+                      menuAction(event, () =>
+                        download(
+                          `${p.name}.json`,
+                          new Blob([serializeProjectJson(p)], {
+                            type: "application/json",
+                          }),
+                        ),
+                      )
+                    }
+                  >
+                    <Download />
+                    JSON
+                  </button>
+                </div>
+              </details>
+              <details className="action-menu">
+                <summary onClick={toggleMenu}>
+                  <Link2 />
+                  CableBuilder
+                  <ChevronDown />
+                </summary>
+                <div className="action-menu-items">
+                  <button onClick={(event) => menuAction(event, openCableBuilder)}>
+                    <Link2 />
+                    Send to CableBuilder
+                  </button>
+                  <button onClick={(event) => menuAction(event, importCableBuilder)}>
+                    <Link2 />
+                    Import URL
+                  </button>
+                </div>
+              </details>
               <button onClick={() => fileRef.current?.click()}>
                 <Upload />
-                Import
+                Import file
               </button>
               <input
                 ref={fileRef}
